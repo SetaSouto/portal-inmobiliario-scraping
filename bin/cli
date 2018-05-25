@@ -1,23 +1,48 @@
 #!/usr/bin/env node
 const program = require('commander')
 const inquirer = require('inquirer')
+const opn = require('opn')
 const manager = require('../lib/data-manager')
+const scraper = require('../lib/scraper')
 
-program.command('new [searchName]')
+/**
+ * -------------------------------
+ *           COMMANDS
+ * -------------------------------
+ * Here we found the commands that can be used in the command line interface for this app.
+ */
+
+/**
+ * Create a new search.
+ */
+program.command('new [searchName] [startUrl]')
   .description('Creates a new search for a given url.')
-  .action(async searchName => {
+  .action(async (searchName, startUrl) => {
+    /* Ask for a name for the search if the user does not provide one */
     if (!searchName) searchName = await askForAName()
-    await handlerIfNameExists(searchName)
-    // Ask for URL
-    // Ask if it wants to check immediately and send to check
+    /* Ask for the start url if the user does not provide one */
+    if (!startUrl) {
+      let answers = await inquirer.prompt({type: 'input', name: 'startUrl', message: 'Result page where to start:'})
+      startUrl = answers.startUrl
+    }
+    /* Save the search and the url */
+    manager.create(searchName, startUrl)
+    /* Check for properties now ? */
+    const {confirmation} = await inquirer.prompt({
+      type: 'confirm',
+      name: 'confirmation',
+      message: 'Do you want to check for properties now?',
+      default: true
+    })
+    if (confirmation) await check(searchName)
   })
 
-program.command('check')
+/**
+ * Check for new results for a search.
+ */
+program.command('check [searchName]')
   .description('Check if there are new results for a search.')
-  .action(async () => {
-    // Get properties
-    // Ask one by one for the ones that are news and archive them with a TTL to unarchive them o -1 for infinity.
-  })
+  .action(check)
 
 program.command('delete [searchName]')
   .description('Deletes a saved search.')
@@ -31,13 +56,16 @@ program.command('delete [searchName]')
       searchName = await selectSearch()
     }
     const {confirmation} = await inquirer.prompt({
-      type: 'confirmation',
+      type: 'confirm',
       name: 'confirmation',
       message: `Are you sure? This will delete all related to '${searchName}.`
     })
     if (confirmation) manager.remove(searchName)
   })
 
+/**
+ * List all the searches created.
+ */
 program.command('list')
   .description('List all the created searches.')
   .action(() => {
@@ -50,31 +78,94 @@ program.parse(process.argv)
 
 /** -----------------------------
  *          MIDDLEWARE
- *  ----------------------------- */
+ *  -----------------------------
+ *  Here we found useful functions used more than once or that are recursive. This way they can be reused in another
+ *  parts of the code or recall it itself.
+ */
 
-async function handlerIfNameExists (searchName) {
-  if (!manager.exists(searchName)) return
-  let {option} = await inquirer.prompt({
-    type: 'list',
-    name: 'option',
-    message: 'A search with that searchName already exists, what do you dant to do?',
-    choices: ['Overwrite', 'Cancel']
-  })
-  if (option === 'Overwrite') manager.remove(searchName)
-  else process.exit()
-}
-
+/**
+ * Ask for a name to name a search.
+ * If the name exists it gives to the user the possibility to overwrite, provide another name or exit.
+ * @param {String} message - First message to ask for the name.
+ * @returns {Promise<String>} - A promise that resolves with the name.
+ */
 async function askForAName (message = 'How do you want to name this search?') {
   let answers = await inquirer.prompt({type: 'input', name: 'name', message})
-  return answers.name
+  let searchName = answers.name
+  if (!manager.exists(searchName)) return searchName
+  /* Ask for what to do */
+  const choices = ['Provide another name', 'Overwrite', 'Exit']
+  let {option} = await
+    inquirer.prompt({
+      type: 'list',
+      name: 'option',
+      message: 'A search with that name already exists, what do you want to do?',
+      choices
+    })
+  if (option === choices[0]) return askForAName()
+  if (option === choices[1]) {
+    let {confirmation} = await inquirer.prompt({
+      type: 'confirm',
+      name: 'confirmation',
+      message: `Are you sure? This will delete all the data about '${searchName}'`
+    })
+    if (confirmation) {
+      manager.remove(searchName)
+      return searchName
+    } else {
+      return askForAName()
+    }
+  } else {
+    process.exit()
+  }
 }
 
-async function selectSearch () {
-  let answers = await inquirer.prompt({
-    type: 'list',
-    name: 'name',
-    message: 'Please select a search',
-    choices: manager.list()
+/**
+ * Ask to the user to select a search from the created ones.
+ * @param {String} [message] - Message to ask to the user.
+ * @returns {Promise<String>} - A promise that resolves with the name of the selected search.
+ */
+async function selectSearch (message = 'Please select a search:') {
+  return inquirer.prompt({type: 'list', name: 'name', message, choices: manager.list()}).then(answers => answers.name)
+}
+
+/**
+ * Check for new properties for a given search.
+ * @param {String} [searchName] - Name of the search to check. Optional, if it is no one, ask to the user to select one.
+ * @returns {Promise<void>}
+ */
+async function check (searchName) {
+  if (!searchName) searchName = await selectSearch()
+  const searchData = manager.load(searchName)
+  console.log('Scraping site ...')
+  const onlineProperties = await scraper.getProperties(searchData.url)
+  const savedProperties = [...searchData.properties.favorites, ...searchData.properties.archived]
+  const newProperties = onlineProperties.filter(link => savedProperties.indexOf(link) === -1)
+  const {iterateNow} = await inquirer.prompt({
+    type: 'confirm',
+    name: 'iterateNow',
+    message: `You have ${newProperties.length} new properties to check. Do you want to iterate one by one now?`,
+    default: true
   })
-  return answers.name
+  if (iterateNow) {
+    for (let i = 0; i < newProperties.length; i++) {
+      const link = newProperties[i]
+      console.log(`Este es el link de la propiedad (${i + 1} de ${newProperties.length}):\n${link}`)
+      opn(link)
+      const choices = ['Archivar', 'Agregar a favoritos', 'Saltar']
+      let {option} = await inquirer.prompt({
+        type: 'list',
+        name: 'option',
+        message: 'Qué deseas hacer?',
+        choices
+      })
+      if (option === choices[0]) {
+        searchData.properties.archived.push(link)
+        manager.save(searchName, searchData)
+      } else if (option === choices[1]) {
+        searchData.properties.favorites.push(link)
+        manager.save(searchName, searchData)
+      }
+    }
+  }
 }

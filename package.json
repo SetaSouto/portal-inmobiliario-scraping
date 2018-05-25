@@ -27,6 +27,7 @@
   "dependencies": {
     "commander": "^2.15.1",
     "inquirer": "^5.2.0",
+    "opn": "^5.3.0",
     "puppeteer": "^1.4.0",
     "winston-namespace": "^1.0.0"
   },
