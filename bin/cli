@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+const program = require('commander')
+const inquirer = require('inquirer')
+const manager = require('../lib/data-manager')
+
+program.command('new [searchName]')
+  .description('Creates a new search for a given url.')
+  .action(async searchName => {
+    if (!searchName) searchName = await askForAName()
+    await handlerIfNameExists(searchName)
+    // Ask for URL
+    // Ask if it wants to check immediately and send to check
+  })
+
+program.command('check')
+  .description('Check if there are new results for a search.')
+  .action(async () => {
+    // Get properties
+    // Ask one by one for the ones that are news and archive them with a TTL to unarchive them o -1 for infinity.
+  })
+
+program.command('delete [searchName]')
+  .description('Deletes a saved search.')
+  .action(async searchName => {
+    if (searchName && !manager.exists(searchName)) {
+      console.log(`There is no search with name '${searchName}'.`)
+      searchName = null
+    }
+    if (!searchName) {
+      if (!manager.list().length) return console.log(`There aren't any search.`)
+      searchName = await selectSearch()
+    }
+    const {confirmation} = await inquirer.prompt({
+      type: 'confirmation',
+      name: 'confirmation',
+      message: `Are you sure? This will delete all related to '${searchName}.`
+    })
+    if (confirmation) manager.remove(searchName)
+  })
+
+program.command('list')
+  .description('List all the created searches.')
+  .action(() => {
+    const searches = manager.list()
+    if (!searches.length) console.log(`There are no created searches.`)
+    else console.log(searches)
+  })
+
+program.parse(process.argv)
+
+/** -----------------------------
+ *          MIDDLEWARE
+ *  ----------------------------- */
+
+async function handlerIfNameExists (searchName) {
+  if (!manager.exists(searchName)) return
+  let {option} = await inquirer.prompt({
+    type: 'list',
+    name: 'option',
+    message: 'A search with that searchName already exists, what do you dant to do?',
+    choices: ['Overwrite', 'Cancel']
+  })
+  if (option === 'Overwrite') manager.remove(searchName)
+  else process.exit()
+}
+
+async function askForAName (message = 'How do you want to name this search?') {
+  let answers = await inquirer.prompt({type: 'input', name: 'name', message})
+  return answers.name
+}
+
+async function selectSearch () {
+  let answers = await inquirer.prompt({
+    type: 'list',
+    name: 'name',
+    message: 'Please select a search',
+    choices: manager.list()
+  })
+  return answers.name
+}

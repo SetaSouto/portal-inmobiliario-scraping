@@ -2,7 +2,10 @@
   "name": "portal-inmobiliario-scraping",
   "version": "0.1.0",
   "description": "A package to scrape the portal inmobiliario web site.",
-  "main": "index.js",
+  "main": "bin/cli",
+  "bin": {
+    "properties-checker": "bin/cli"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -22,6 +25,8 @@
   },
   "homepage": "https://github.com/SetaSouto/portal-inmobiliario-scraping#readme",
   "dependencies": {
+    "commander": "^2.15.1",
+    "inquirer": "^5.2.0",
     "puppeteer": "^1.4.0",
     "winston-namespace": "^1.0.0"
   },
